@@ -1,0 +1,69 @@
+{
+  "meta": {
+    "title": "Otto the Octopus Explains the Tides",
+    "slug": "octopus-tides",
+    "style": "cartoon",
+    "style_suffix": "Pixar-style 3D cartoon, vibrant saturated colors, soft three-point lighting, rounded friendly character shapes, shallow depth of field, cinematic composition",
+    "aspect_ratio": "9:16",
+    "total_duration_s": 30,
+    "voice": {
+      "voice_id": "en-US-AriaNeural",
+      "rate": "+5%",
+      "pitch": "+0Hz",
+      "volume": "+0%"
+    },
+    "captions": {
+      "enabled": true
+    }
+  },
+  "scenes": [
+    {
+      "id": "01",
+      "duration_s": 4,
+      "narration": "Meet Otto. He's about to teach you why the ocean breathes.",
+      "image_prompt": "A cheerful purple octopus with large round eyes and a small yellow bowtie, waving one tentacle, sitting on a coral reef, medium close-up, friendly expression",
+      "motion_prompt": "slow zoom in, gentle tentacle wave",
+      "on_screen_text": null
+    },
+    {
+      "id": "02",
+      "duration_s": 5,
+      "narration": "Twice a day, the sea rises... and twice a day, it falls back down.",
+      "image_prompt": "Wide cartoon beach scene, water level rising along the sand, soft golden sunset",
+      "motion_prompt": "slow pan right across the beach",
+      "on_screen_text": "TIDES"
+    },
+    {
+      "id": "03",
+      "duration_s": 5,
+      "narration": "That rhythm? It's the moon. Tugging on the ocean from a quarter million miles away.",
+      "image_prompt": "Cartoon Earth and moon in space, glowing arc of gravity between them, Earth's oceans bulging toward the moon, stylized and educational",
+      "motion_prompt": "slow zoom out to reveal the full scene",
+      "on_screen_text": null
+    },
+    {
+      "id": "04",
+      "duration_s": 5,
+      "narration": "The water nearest the moon bulges up. The water on the opposite side bulges too.",
+      "image_prompt": "A cheerful purple octopus with large round eyes and a small yellow bowtie pointing at two bulges on a cartoon Earth, with the moon to the right",
+      "motion_prompt": "subject tilts head, pointing gesture",
+      "on_screen_text": null
+    },
+    {
+      "id": "05",
+      "duration_s": 5,
+      "narration": "As Earth spins underneath, every coastline passes through both bulges. Two tides a day.",
+      "image_prompt": "Spinning cartoon Earth seen from above, water bulges visible, time-lapse feel, stylized educational illustration",
+      "motion_prompt": "Earth slowly rotates",
+      "on_screen_text": "2 TIDES / DAY"
+    },
+    {
+      "id": "06",
+      "duration_s": 6,
+      "narration": "So next time you're at the beach, remember — that wave climbing up the sand? It's the moon, saying hi.",
+      "image_prompt": "A cheerful purple octopus with large round eyes and a small yellow bowtie standing on a sunset beach waving up at a giant moon in the sky",
+      "motion_prompt": "slow zoom in on octopus, then tilt up toward the moon",
+      "on_screen_text": "👋 hi moon"
+    }
+  ]
+}
