@@ -1,0 +1,17 @@
+# Python TTS dependencies for scripts/*.py
+# Install into a venv (Ubuntu 24.04+ blocks bare `pip install` via PEP 668):
+#   python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
+#
+# Kokoro (free, local) — default engine. Needs espeak-ng installed at the OS level too.
+kokoro
+soundfile
+numpy
+
+# ElevenLabs (paid, premium) — alternative engine. Needs ELEVENLABS_API_KEY.
+elevenlabs
+
+# Edge TTS fallback (Microsoft, free, online)
+edge-tts
+
+# Used by every script for loading .env
+python-dotenv
