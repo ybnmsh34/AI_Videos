@@ -1,0 +1,22 @@
+# Generated content
+output/
+work/
+
+# Cached Piper voice models (auto-downloaded by render.py)
+.claude/skills/ai-video-creator/voices/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp

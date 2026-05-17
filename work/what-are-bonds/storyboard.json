@@ -1,0 +1,68 @@
+{
+  "meta": {
+    "title": "What Are Bonds?",
+    "slug": "what-are-bonds",
+    "style": "cartoon",
+    "style_suffix": "Pixar-style 3D cartoon, vibrant saturated colors, soft three-point cinematic lighting, large expressive eyes, exaggerated micro-expressions, shallow depth of field, vertical 9:16 composition, premium animation quality",
+    "aspect_ratio": "9:16",
+    "total_duration_s": 58,
+    "voice": {
+      "provider": "edge-tts",
+      "voice_id": "en-US-AriaNeural",
+      "rate": "+8%",
+      "pitch": "+0Hz",
+      "volume": "+0%"
+    },
+    "music": {
+      "mood": "light futuristic beats, soft bass, modern finance short",
+      "volume_db": -22
+    },
+    "captions": {
+      "enabled": true,
+      "style": "tiktok-bold-white"
+    },
+    "character": "Leo, a Pixar-style 3D animated young boy around 8 years old, with light tan skin, tousled chestnut-brown hair with subtle golden highlights on top, large round expressive dark brown eyes, small button nose, soft round cartoon face, wearing a teal-and-white colorblock zip-up vest hoodie with a grey hood over a clean white t-shirt, dark grey cargo joggers, blue and white low-top sneakers"
+  },
+  "scenes": [
+    {
+      "id": "01",
+      "duration_s": 6,
+      "narration": "Wait... people get PAID just for lending money?",
+      "image_prompt": "Extreme close-up of Leo, a Pixar-style 3D animated young boy around 8 years old with light tan skin, tousled chestnut-brown hair with subtle golden highlights, large round expressive dark brown eyes, small button nose, soft round cartoon face, wearing a teal-and-white colorblock zip-up vest hoodie with a grey hood over a clean white t-shirt. He is holding a crisp ten dollar bill up near his face, looking sideways at it with one eyebrow raised high and a slight skeptical squint, mouth tilted in a confused half-smirk. Background slightly dark with glowing blurred neon city lights at night, bokeh, cinematic moody lighting from one side, vertical composition centered on his face, headroom above",
+      "motion_prompt": "Quick dramatic zoom in on Leo's face, his eyes dart sideways, eyebrow flicks up, subtle head tilt",
+      "on_screen_text": null
+    },
+    {
+      "id": "02",
+      "duration_s": 12,
+      "narration": "When governments or companies need money to build things, they sell bonds — basically big IOUs.",
+      "image_prompt": "Leo, a Pixar-style 3D animated young boy around 8 years old with light tan skin, tousled chestnut-brown hair with subtle golden highlights, large round expressive dark brown eyes, small button nose, soft round cartoon face, wearing a teal-and-white colorblock zip-up vest hoodie with a grey hood over a clean white t-shirt and dark grey cargo joggers, standing in front of a giant futuristic government building under construction, holographic blue scaffolding glowing around it. He is curiously holding out a single glowing gold coin toward the building, eyes wide with curiosity, lips slightly pursed, head tilted thoughtfully. Wide medium shot from behind-side angle showing both Leo and the rising hologram city, warm golden hour light mixed with blue holographic glow, vertical composition with the building towering above him",
+      "motion_prompt": "Slow camera pull back revealing the scale, holographic city slowly rises in the background, Leo's coin glows brighter",
+      "on_screen_text": "BONDS = IOUs"
+    },
+    {
+      "id": "03",
+      "duration_s": 17,
+      "narration": "You lend them money today, and they pay you back later — with extra cash on top, called interest. Every month, like clockwork.",
+      "image_prompt": "Leo, a Pixar-style 3D animated young boy around 8 years old with light tan skin, tousled chestnut-brown hair with subtle golden highlights, large round expressive dark brown eyes, small button nose, soft round cartoon face, wearing a teal-and-white colorblock zip-up vest hoodie with a grey hood over a clean white t-shirt and dark grey cargo joggers. He holds open a glowing leather wallet as a steady stream of golden coins rains down into it from above, an animated contract scroll floating beside him with a glowing percent symbol. His face is lit up in pleasant surprise turning to joy, eyes wide and sparkling, mouth open in a big delighted smile, slight excited head tilt. Cinematic warm lighting with gold sparkle particles, vertical composition centered on Leo and the wallet, soft purple background with gold accents",
+      "motion_prompt": "Coins rain steadily down into the wallet, sparkles float upward, Leo's smile widens, camera slowly pushes in",
+      "on_screen_text": "+ INTEREST"
+    },
+    {
+      "id": "04",
+      "duration_s": 15,
+      "narration": "Stocks can grow way faster, but they're a wild ride. Bonds? Way steadier — slower growth, fewer surprises.",
+      "image_prompt": "Split-screen vertical composition showing two side-by-side futuristic glass elevators inside a sleek skyscraper. Left elevator labeled STOCKS shakes wildly with chaotic motion blur, sparks flying, red warning lights, Leo inside it looking nervous with hair tousled, mouth in a worried grimace, eyes wide and anxious. Right elevator labeled BONDS rises smoothly and calmly with cool blue light, a second Leo inside looking relaxed and serene with a peaceful soft smile, eyes half-closed contentedly. Both Leos are the same Pixar-style 3D animated young boy around 8 years old with light tan skin, tousled chestnut-brown hair with subtle golden highlights, large round expressive dark brown eyes, small button nose, soft round cartoon face, wearing a teal-and-white colorblock zip-up vest hoodie with a grey hood over a clean white t-shirt and dark grey cargo joggers. Cinematic dramatic lighting contrast, vertical 9:16 split composition",
+      "motion_prompt": "Left elevator shakes and jolts violently, right elevator glides smoothly upward, lighting flickers red on left and stays calm blue on right",
+      "on_screen_text": "STOCKS vs BONDS"
+    },
+    {
+      "id": "05",
+      "duration_s": 8,
+      "narration": "That's why smart investors often use both. Grow with stocks. Protect with bonds.",
+      "image_prompt": "Leo, a Pixar-style 3D animated young boy around 8 years old with light tan skin, tousled chestnut-brown hair with subtle golden highlights, large round expressive dark brown eyes, small button nose, soft round cartoon face, wearing a teal-and-white colorblock zip-up vest hoodie with a grey hood over a clean white t-shirt and dark grey cargo joggers, standing confidently on a rooftop overlooking a glowing futuristic city skyline at sunset, hands on hips, a holographic portfolio chart floating beside him perfectly balanced with green growth arrows and blue shield icons. His expression is calm proud confidence, relaxed satisfied smile, determined sparkling eyes, slight proud nod. Cinematic golden hour light from behind creating a warm rim light around his hair, wide low-angle hero shot from below making him look powerful, vertical composition with city skyline below and warm orange sky above",
+      "motion_prompt": "Slow cinematic camera push in on Leo, wind gently moves his hair, holographic chart rotates softly, city lights twinkle below",
+      "on_screen_text": "GROW + PROTECT"
+    }
+  ]
+}
