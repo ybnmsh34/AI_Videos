@@ -185,7 +185,7 @@ def _gen_clip_ffmpeg(ctx: "RenderContext", scene: dict, image_path: Path, out_pa
     inter_h = ctx.height * 2
 
     vf = (
-        f"scale={inter_w}:{inter_h}:force_original_aspect_ratio=cover,"
+        f"scale={inter_w}:{inter_h}:force_original_aspect_ratio=increase,"
         f"crop={inter_w}:{inter_h},"
         f"zoompan=z='{z_expr}':x='{x_expr}':y='{y_expr}':d={frames}:s={ctx.width}x{ctx.height}:fps={FPS}"
     )
@@ -385,7 +385,7 @@ def compose(ctx: "RenderContext") -> Path:
         "ffmpeg", "-y", "-loglevel", "error",
         "-f", "concat", "-safe", "0",
         "-i", str(concat_list),
-        "-vf", f"scale={ctx.width}:{ctx.height}:force_original_aspect_ratio=cover,crop={ctx.width}:{ctx.height},fps={FPS}",
+        "-vf", f"scale={ctx.width}:{ctx.height}:force_original_aspect_ratio=increase,crop={ctx.width}:{ctx.height},fps={FPS}",
         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast",
         "-an",
         str(video_only),
