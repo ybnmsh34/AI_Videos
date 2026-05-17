@@ -1,6 +1,11 @@
-# Voice presets (edge-tts)
+# Voice presets
 
-The skill uses **edge-tts** — Microsoft's neural voices via the Edge browser API. Free, no key, very high quality.
+The skill picks a voice from `meta.voice.voice_id` in the storyboard. TTS chain:
+
+1. **edge-tts** (default, online) — Microsoft Edge neural voices. Free, no key, very high quality.
+2. **Piper** (offline fallback) — local CPU TTS, runs without internet. Voice models auto-downloaded on first use to `voices/`.
+
+If edge-tts fails (no internet, endpoint down) the renderer falls back to Piper automatically. Force Piper with `OFFLINE_TTS=1`.
 
 List all available voices:
 ```bash
@@ -43,3 +48,20 @@ edge-tts supports inline SSML-style adjustments via render.py args:
 - `volume`: `-50%` to `+50%`
 
 For cartoons/kids' content, try `rate: "+10%"` and `pitch: "+5Hz"` for extra liveliness. For documentary, `rate: "-5%"` slows for gravitas.
+
+## Piper voices (offline fallback)
+
+The renderer maps each edge-tts voice to the closest Piper voice automatically. You don't need to set this manually unless you want a specific Piper voice.
+
+| edge-tts voice | Piper fallback |
+|---|---|
+| `en-US-AriaNeural`, `en-US-JennyNeural` | `en_US-amy-medium` |
+| `en-US-GuyNeural`, `en-US-DavisNeural`, `en-US-TonyNeural` | `en_US-ryan-medium` |
+| `en-US-AnaNeural` | `en_US-amy-low` |
+| `en-GB-SoniaNeural`, `en-AU-NatashaNeural` | `en_GB-jenny_dioco-medium` |
+| `en-GB-RyanNeural` | `en_GB-alan-medium` |
+
+Browse all Piper voices: https://huggingface.co/rhasspy/piper-voices
+
+Piper voices are ~50MB each, downloaded once and cached in `.claude/skills/ai-video-creator/voices/`. Quality tiers: `x_low` < `low` < `medium` < `high` (file size and CPU cost increase with quality).
+

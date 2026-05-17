@@ -20,6 +20,7 @@ Env vars (all optional):
     FPS=24                       output frame rate
     USE_HF_SVD=1                 try HuggingFace SVD for motion (free tier, may rate-limit)
     HF_TOKEN=hf_xxx              optional HF token (anonymous works for some models)
+    OFFLINE_TTS=1                skip edge-tts, go straight to local Piper TTS
     MUSIC_FILE=/path/song.mp3    background music, ducked under narration
     MUSIC_VOLUME=0.18            music gain (0.0-1.0) before mix
 
@@ -246,7 +247,26 @@ def _gen_clip_hf_svd(ctx: "RenderContext", scene: dict, image_path: Path, out_pa
     raw_clip.unlink(missing_ok=True)
 
 
-# ---------- TTS (edge-tts) ----------
+# ---------- TTS (edge-tts → piper offline fallback) ----------
+
+OFFLINE_TTS = os.environ.get("OFFLINE_TTS") == "1"
+PIPER_VOICES_DIR = Path(__file__).resolve().parent.parent / "voices"
+PIPER_DEFAULT_VOICE = "en_US-amy-medium"  # matches Aria's warm-female vibe
+PIPER_VOICE_BASE = "https://huggingface.co/rhasspy/piper-voices/resolve/main"
+
+# edge-tts voice → closest Piper voice
+EDGE_TO_PIPER = {
+    "en-US-AriaNeural": "en_US-amy-medium",
+    "en-US-JennyNeural": "en_US-amy-medium",
+    "en-US-GuyNeural": "en_US-ryan-medium",
+    "en-US-DavisNeural": "en_US-ryan-medium",
+    "en-US-AnaNeural": "en_US-amy-low",
+    "en-US-TonyNeural": "en_US-ryan-medium",
+    "en-GB-SoniaNeural": "en_GB-jenny_dioco-medium",
+    "en-GB-RyanNeural": "en_GB-alan-medium",
+    "en-AU-NatashaNeural": "en_GB-jenny_dioco-medium",
+}
+
 
 def gen_narration(ctx: "RenderContext", scene: dict, out_path: Path) -> None:
     if out_path.exists():
@@ -256,14 +276,26 @@ def gen_narration(ctx: "RenderContext", scene: dict, out_path: Path) -> None:
     text = scene["narration"]
     voice_cfg = ctx.storyboard["meta"].get("voice", {})
     voice_id = voice_cfg.get("voice_id", "en-US-AriaNeural")
-    rate = voice_cfg.get("rate", "+0%")
-    pitch = voice_cfg.get("pitch", "+0Hz")
-    volume = voice_cfg.get("volume", "+0%")
 
+    if not OFFLINE_TTS:
+        try:
+            _tts_edge(text, voice_cfg, voice_id, out_path)
+            return
+        except Exception as e:  # noqa: BLE001
+            log(f"  edge-tts failed ({e}); falling back to piper (offline)")
+
+    _tts_piper(text, voice_id, out_path)
+
+
+def _tts_edge(text: str, voice_cfg: dict, voice_id: str, out_path: Path) -> None:
     try:
         import edge_tts  # type: ignore
     except ImportError:
-        die("edge-tts not installed. Run: bash .claude/skills/ai-video-creator/scripts/setup.sh")
+        raise RuntimeError("edge-tts not installed")
+
+    rate = voice_cfg.get("rate", "+0%")
+    pitch = voice_cfg.get("pitch", "+0Hz")
+    volume = voice_cfg.get("volume", "+0%")
 
     async def _synth() -> None:
         communicate = edge_tts.Communicate(  # type: ignore
@@ -272,11 +304,68 @@ def gen_narration(ctx: "RenderContext", scene: dict, out_path: Path) -> None:
         await communicate.save(str(out_path))
 
     log(f"  tts (edge-tts, {voice_id}): {text[:60]}...")
+    with_retry(lambda: asyncio.run(_synth()), label="edge-tts", base_delay=3.0)
 
-    def _call() -> None:
-        asyncio.run(_synth())
 
-    with_retry(_call, label="edge-tts", base_delay=3.0)
+def _tts_piper(text: str, voice_id: str, out_path: Path) -> None:
+    """Fully offline TTS via piper. Voice models are auto-downloaded once."""
+    piper_voice = EDGE_TO_PIPER.get(voice_id, PIPER_DEFAULT_VOICE)
+    onnx_path, json_path = _ensure_piper_voice(piper_voice)
+
+    if not shutil.which("piper"):
+        die(
+            "piper TTS not installed. Run: bash .claude/skills/ai-video-creator/scripts/setup.sh\n"
+            "(or: pip install --user piper-tts)"
+        )
+
+    wav_path = out_path.with_suffix(".wav")
+    log(f"  tts (piper offline, {piper_voice}): {text[:60]}...")
+
+    proc = subprocess.run(
+        ["piper", "--model", str(onnx_path), "--output_file", str(wav_path)],
+        input=text, text=True, capture_output=True, check=False,
+    )
+    if proc.returncode != 0:
+        die(f"piper failed: {proc.stderr[-500:]}")
+
+    run([
+        "ffmpeg", "-y", "-loglevel", "error",
+        "-i", str(wav_path),
+        "-codec:a", "libmp3lame", "-b:a", "192k",
+        str(out_path),
+    ])
+    wav_path.unlink(missing_ok=True)
+
+
+def _ensure_piper_voice(voice_name: str) -> tuple[Path, Path]:
+    """Download piper voice model on first use. Cached in voices/."""
+    PIPER_VOICES_DIR.mkdir(parents=True, exist_ok=True)
+    onnx_path = PIPER_VOICES_DIR / f"{voice_name}.onnx"
+    json_path = PIPER_VOICES_DIR / f"{voice_name}.onnx.json"
+
+    if onnx_path.exists() and json_path.exists():
+        return onnx_path, json_path
+
+    # Voice name format: lang_REGION-name-quality, e.g. en_US-amy-medium
+    parts = voice_name.split("-")
+    lang_region = parts[0]            # en_US
+    lang = lang_region.split("_")[0]  # en
+    speaker = parts[1]                # amy
+    quality = parts[2] if len(parts) > 2 else "medium"
+
+    base = f"{PIPER_VOICE_BASE}/{lang}/{lang_region}/{speaker}/{quality}"
+    log(f"  downloading piper voice {voice_name} (one-time, ~50MB)...")
+
+    for suffix, dest in ((".onnx", onnx_path), (".onnx.json", json_path)):
+        url = f"{base}/{voice_name}{suffix}"
+        req = urllib.request.Request(url, headers={"User-Agent": "ai-video-creator/1.0"})
+        try:
+            with urllib.request.urlopen(req, timeout=180) as r, open(dest, "wb") as f:
+                shutil.copyfileobj(r, f)
+        except Exception as e:  # noqa: BLE001
+            die(f"failed to download piper voice {voice_name} ({suffix}): {e}\nURL: {url}")
+
+    return onnx_path, json_path
 
 
 # ---------- compose ----------
