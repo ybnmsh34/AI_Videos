@@ -97,14 +97,17 @@ def aspect_to_dims(aspect: str) -> tuple[int, int]:
 
 # ---------- image generation (pollinations.ai) ----------
 
-def gen_image(ctx: "RenderContext", scene: dict, out_path: Path) -> None:
+def gen_image(ctx: "RenderContext", scene: dict, out_path: Path, variant_idx: int = 0) -> None:
     if out_path.exists():
         log(f"  image cached: {out_path.name}")
         return
 
     style_suffix = ctx.storyboard["meta"].get("style_suffix", "")
     prompt = f"{scene['image_prompt']}, {style_suffix}".strip(", ")
-    seed = int(scene["id"]) * 1000 + 7  # deterministic per scene
+    # Deterministic seed per (scene, variant). variant_idx>0 spreads far enough
+    # that Pollinations produces visibly different micro-poses but the long
+    # character description in the prompt keeps the same identity.
+    seed = int(scene["id"]) * 1000 + 7 + variant_idx * 131
     params = {
         "width": str(ctx.width),
         "height": str(ctx.height),
@@ -126,81 +129,173 @@ def gen_image(ctx: "RenderContext", scene: dict, out_path: Path) -> None:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_bytes(data)
 
-    log(f"  image (pollinations): {prompt[:90]}...")
+    label = f"image v{variant_idx}" if variant_idx else "image"
+    log(f"  {label} (pollinations): {prompt[:90]}...")
     with_retry(_download, label="pollinations", base_delay=3.0)
 
 
 # ---------- motion synthesis ----------
 
+# Camera-move presets used by the multi-image path. Each returns the
+# (z, x, y) zoompan expressions for a given frame count. Rotating through
+# these between variants keeps consecutive segments visually distinct.
+_MOTION_PRESETS = {
+    "zoom_in":   lambda f: ("min(zoom+0.0009,1.25)",
+                            "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"),
+    "zoom_out":  lambda f: ("if(eq(on,0),1.25,max(zoom-0.0008,1.05))",
+                            "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"),
+    "pan_right": lambda f: ("1.20",
+                            f"(iw*0.20)*on/{f}", "ih/2-(ih/zoom/2)"),
+    "pan_left":  lambda f: ("1.20",
+                            f"iw*0.20-(iw*0.20)*on/{f}", "ih/2-(ih/zoom/2)"),
+    "tilt_up":   lambda f: ("1.20",
+                            "iw/2-(iw/zoom/2)", f"ih*0.20-(ih*0.20)*on/{f}"),
+    "tilt_down": lambda f: ("1.20",
+                            "iw/2-(iw/zoom/2)", f"(ih*0.20)*on/{f}"),
+}
+_MOTION_ROTATION = ["zoom_in", "pan_right", "zoom_out", "pan_left", "tilt_up", "tilt_down"]
+
+
+def _n_variants_for(duration: float) -> int:
+    """How many variant images / sub-clips to generate for a scene.
+    Roughly one new image every ~5 seconds, clipped to a sane range."""
+    return max(1, min(5, round(duration / 5)))
+
+
+def _motion_for_scene(scene: dict, variant_idx: int) -> str:
+    """Pick a motion preset for a given variant.
+    Variant 0 honors the scene's motion_prompt; later variants rotate
+    through the preset list so consecutive segments differ."""
+    motion = (scene.get("motion_prompt") or "").lower()
+    if variant_idx == 0:
+        if "zoom out" in motion or "pull back" in motion or "dolly out" in motion:
+            return "zoom_out"
+        if "pan left" in motion or "left" in motion:
+            return "pan_left"
+        if "pan right" in motion or "right" in motion:
+            return "pan_right"
+        if "tilt up" in motion or " up" in f" {motion}":
+            return "tilt_up"
+        if "tilt down" in motion or " down" in f" {motion}":
+            return "tilt_down"
+        return "zoom_in"
+    return _MOTION_ROTATION[variant_idx % len(_MOTION_ROTATION)]
+
+
+def _probe_duration(p: Path) -> float:
+    out = run([
+        "ffprobe", "-v", "error", "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1", str(p),
+    ])
+    try:
+        return float(out.stdout.strip())
+    except ValueError:
+        return 0.0
+
+
 def gen_clip(ctx: "RenderContext", scene: dict, image_path: Path, out_path: Path) -> None:
+    """Build a scene clip. For scenes long enough to warrant multiple images,
+    generate N variants (same character prompt, different seeds, different
+    camera moves) and crossfade them together. Otherwise single-image
+    Ken Burns. Variant images and sub-clips are cached individually."""
     if out_path.exists():
         log(f"  clip cached: {out_path.name}")
         return
 
-    if USE_HF_SVD:
-        try:
-            _gen_clip_hf_svd(ctx, scene, image_path, out_path)
-            return
-        except Exception as e:  # noqa: BLE001
-            log(f"  HF SVD failed ({e}); falling back to ffmpeg motion")
-
-    _gen_clip_ffmpeg(ctx, scene, image_path, out_path)
-
-
-def _gen_clip_ffmpeg(ctx: "RenderContext", scene: dict, image_path: Path, out_path: Path) -> None:
-    """Generate motion via ffmpeg zoompan / pan, choosing direction from motion_prompt."""
     duration = float(scene["duration_s"])
+    n = _n_variants_for(duration)
+
+    if n == 1:
+        _gen_clip_segment(ctx, scene, image_path, out_path, duration,
+                          motion=_motion_for_scene(scene, 0))
+        return
+
+    scenes_dir = image_path.parent
+    sid = scene["id"]
+    xfade = 0.4
+    seg_dur = duration / n + xfade   # overlap absorbs the crossfade time
+
+    sub_clips: list[Path] = []
+    for i in range(n):
+        variant_img = scenes_dir / f"{sid}_image_v{i:02d}.png"
+        gen_image(ctx, scene, variant_img, variant_idx=i)
+        sub_clip = scenes_dir / f"{sid}_clip_v{i:02d}.mp4"
+        _gen_clip_segment(ctx, scene, variant_img, sub_clip, seg_dur,
+                          motion=_motion_for_scene(scene, i))
+        sub_clips.append(sub_clip)
+
+    _xfade_chain(sub_clips, xfade_sec=xfade, target_duration=duration,
+                 size=(ctx.width, ctx.height), out_path=out_path)
+
+
+def _gen_clip_segment(ctx: "RenderContext", scene: dict, image_path: Path,
+                      out_path: Path, duration: float, motion: str) -> None:
+    """Single still → single Ken Burns clip with the named motion preset."""
+    if out_path.exists():
+        log(f"  sub-clip cached: {out_path.name}")
+        return
     frames = max(1, int(round(duration * FPS)))
-    motion = (scene.get("motion_prompt") or "").lower()
+    z_expr, x_expr, y_expr = _MOTION_PRESETS[motion](frames)
 
-    # Choose a motion preset
-    if "zoom out" in motion or "pull back" in motion or "dolly out" in motion:
-        z_expr = "if(eq(on,0),1.20,max(zoom-0.0008,1.0))"
-        x_expr = "iw/2-(iw/zoom/2)"
-        y_expr = "ih/2-(ih/zoom/2)"
-    elif "pan left" in motion or "left" in motion:
-        z_expr = "1.20"
-        x_expr = "iw*0.20-(iw*0.20)*on/" + str(frames)
-        y_expr = "ih/2-(ih/zoom/2)"
-    elif "pan right" in motion or "right" in motion:
-        z_expr = "1.20"
-        x_expr = "(iw*0.20)*on/" + str(frames)
-        y_expr = "ih/2-(ih/zoom/2)"
-    elif "tilt up" in motion or "up" in motion:
-        z_expr = "1.20"
-        x_expr = "iw/2-(iw/zoom/2)"
-        y_expr = "ih*0.20-(ih*0.20)*on/" + str(frames)
-    elif "tilt down" in motion or "down" in motion:
-        z_expr = "1.20"
-        x_expr = "iw/2-(iw/zoom/2)"
-        y_expr = "(ih*0.20)*on/" + str(frames)
-    else:
-        # default: slow Ken Burns zoom in
-        z_expr = f"min(zoom+0.0009,1.25)"
-        x_expr = "iw/2-(iw/zoom/2)"
-        y_expr = "ih/2-(ih/zoom/2)"
-
-    # Render at 2x output resolution intermediate to avoid zoompan jitter, then scale down
     inter_w = ctx.width * 2
     inter_h = ctx.height * 2
-
     vf = (
         f"scale={inter_w}:{inter_h}:force_original_aspect_ratio=increase,"
         f"crop={inter_w}:{inter_h},"
-        f"zoompan=z='{z_expr}':x='{x_expr}':y='{y_expr}':d={frames}:s={ctx.width}x{ctx.height}:fps={FPS}"
+        f"zoompan=z='{z_expr}':x='{x_expr}':y='{y_expr}':"
+        f"d={frames}:s={ctx.width}x{ctx.height}:fps={FPS}"
     )
-
-    log(f"  clip (ffmpeg-kenburns): {duration}s @ {FPS}fps  ({frames} frames)")
+    log(f"  clip ({motion}): {duration:.2f}s @ {FPS}fps  ({frames} frames)")
     run([
         "ffmpeg", "-y", "-loglevel", "error",
         "-loop", "1", "-i", str(image_path),
         "-vf", vf,
-        "-t", f"{duration}",
+        "-t", f"{duration:.3f}",
         "-r", str(FPS),
         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast",
         "-an",
         str(out_path),
     ])
+
+
+def _xfade_chain(inputs: list[Path], xfade_sec: float, target_duration: float,
+                 size: tuple[int, int], out_path: Path) -> None:
+    """Crossfade a list of clips together via ffmpeg xfade, then trim/pad to
+    target_duration. With N inputs there are N-1 crossfade transitions."""
+    if len(inputs) == 1:
+        shutil.copy(inputs[0], out_path)
+        return
+
+    durations = [_probe_duration(p) for p in inputs]
+    parts: list[str] = []
+    cum = durations[0]
+    prev = "[0:v]"
+    for i in range(1, len(inputs)):
+        offset = max(0.0, cum - xfade_sec)
+        label = f"[v{i:02d}]"
+        parts.append(
+            f"{prev}[{i}:v]xfade=transition=fade:duration={xfade_sec}"
+            f":offset={offset:.3f}{label}"
+        )
+        cum += durations[i] - xfade_sec
+        prev = label
+    fc = ";".join(parts)
+
+    cmd: list[str] = ["ffmpeg", "-y", "-loglevel", "error"]
+    for inp in inputs:
+        cmd += ["-i", str(inp)]
+    cmd += [
+        "-filter_complex", fc,
+        "-map", prev,
+        "-t", f"{target_duration:.3f}",
+        "-r", str(FPS),
+        "-s", f"{size[0]}x{size[1]}",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast",
+        "-an",
+        str(out_path),
+    ]
+    log(f"  xfade chain: {len(inputs)} sub-clips, {xfade_sec}s overlap -> {target_duration:.2f}s")
+    run(cmd)
 
 
 def _gen_clip_hf_svd(ctx: "RenderContext", scene: dict, image_path: Path, out_path: Path) -> None:
@@ -694,10 +789,7 @@ def main() -> None:
     )
 
     log(f"rendering '{slug}' — {len(storyboard['scenes'])} scenes, {storyboard['meta']['total_duration_s']}s total, {FPS}fps")
-    if USE_HF_SVD:
-        log("motion: HuggingFace SVD (with ffmpeg fallback)")
-    else:
-        log("motion: ffmpeg Ken Burns")
+    log("motion: multi-image + crossfade (Pollinations stills, ffmpeg Ken Burns segments)")
 
     for scene in storyboard["scenes"]:
         sid = scene["id"]
