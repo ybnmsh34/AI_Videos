@@ -34,6 +34,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -420,9 +421,9 @@ def compose(ctx: "RenderContext") -> Path:
         str(narration_full),
     ])
 
-    # 3. captions
-    srt_path = ctx.work_dir / "captions.srt"
-    _write_srt(ctx, srt_path)
+    # 3. captions (Hormozi-style: bottom, white bold all-caps, green emphasis)
+    ass_path = ctx.work_dir / "captions.ass"
+    _write_ass(ctx, ass_path)
 
     # 4. music (optional)
     music_file = os.environ.get("MUSIC_FILE", "")
@@ -431,8 +432,7 @@ def compose(ctx: "RenderContext") -> Path:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     final = OUTPUT_DIR / f"{ctx.slug}.mp4"
 
-    sub_style = "Fontsize=18,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=3,Outline=2,Shadow=0,MarginV=80,Bold=1"
-    vf = f"subtitles={srt_path.resolve()}:force_style='{sub_style}'"
+    vf = f"ass={ass_path.resolve()}"
 
     if music_file and Path(music_file).exists():
         cmd = [
@@ -465,31 +465,110 @@ def compose(ctx: "RenderContext") -> Path:
     return final
 
 
-def _write_srt(ctx: "RenderContext", srt_path: Path) -> None:
-    def fmt(t: float) -> str:
-        h = int(t // 3600); t -= h * 3600
-        m = int(t // 60); t -= m * 60
-        s = int(t); ms = int((t - s) * 1000)
-        return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+# Stopwords used to skip filler when picking the "emphasis" word in a caption chunk.
+_CAPTION_STOPWORDS = {
+    "a", "an", "the", "and", "or", "but", "if", "of", "on", "in", "to", "for",
+    "with", "at", "by", "is", "are", "was", "were", "be", "been", "being", "am",
+    "do", "does", "did", "have", "has", "had", "i", "you", "he", "she", "it",
+    "we", "they", "me", "him", "her", "us", "them", "my", "your", "his", "its",
+    "our", "their", "this", "that", "these", "those", "what", "when", "where",
+    "why", "how", "not", "no", "yes", "so", "than", "then", "as", "just", "like",
+    "up", "down", "out", "over", "into", "from", "about",
+}
 
-    blocks: list[str] = []
+# ASS colour format is &HAABBGGRR&
+_CAPTION_WHITE = "&H00FFFFFF&"
+_CAPTION_GREEN = "&H0000FF00&"   # bright pure green for the emphasis word
+
+
+def _fmt_ass_time(t: float) -> str:
+    h = int(t // 3600); t -= h * 3600
+    m = int(t // 60); t -= m * 60
+    s = int(t)
+    cs = int(round((t - s) * 100))
+    if cs == 100:
+        s += 1; cs = 0
+    return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
+
+
+def _pick_emphasis_idx(chunk: list[str]) -> int:
+    """Choose which word in the chunk gets the green highlight.
+    Prefer the longest non-stopword; fall back to the last word."""
+    def clean(w: str) -> str:
+        return re.sub(r"[^\w]", "", w).lower()
+
+    candidates = [
+        (i, w) for i, w in enumerate(chunk)
+        if clean(w) and clean(w) not in _CAPTION_STOPWORDS
+    ]
+    if not candidates:
+        return len(chunk) - 1
+    return max(candidates, key=lambda iw: (len(clean(iw[1])), iw[0]))[0]
+
+
+def _write_ass(ctx: "RenderContext", ass_path: Path) -> None:
+    """Hormozi-style captions: short all-caps chunks at the bottom,
+    white bold with thick black outline, one green emphasis word per chunk."""
+    width = ctx.width
+    height = ctx.height
+    font_size = max(72, int(height * 0.058))   # ~111 at 1920px tall
+    outline = max(5, int(font_size * 0.075))    # ~8
+    margin_v = int(height * 0.14)               # sits in the lower third
+
+    header = (
+        "[Script Info]\n"
+        "ScriptType: v4.00+\n"
+        f"PlayResX: {width}\n"
+        f"PlayResY: {height}\n"
+        "WrapStyle: 2\n"
+        "ScaledBorderAndShadow: yes\n"
+        "\n"
+        "[V4+ Styles]\n"
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
+        "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
+        "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
+        "Alignment, MarginL, MarginR, MarginV, Encoding\n"
+        f"Style: Default,Anton,{font_size},{_CAPTION_WHITE},&H000000FF&,"
+        f"&H00000000&,&H00000000&,1,0,0,0,100,100,0,0,1,{outline},0,2,"
+        f"80,80,{margin_v},1\n"
+        "\n"
+        "[Events]\n"
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, "
+        "Effect, Text\n"
+    )
+
+    chunk_size = 4
+    events: list[str] = []
     cursor = 0.0
-    idx = 1
-    for s in ctx.storyboard["scenes"]:
-        duration = float(s["duration_s"])
-        words = s["narration"].split()
-        chunks: list[list[str]] = [words[i : i + 6] for i in range(0, len(words), 6)] or [[]]
-        per = duration / max(1, len(chunks))
-        for j, chunk in enumerate(chunks):
-            if not chunk:
-                continue
-            start = cursor + j * per
-            end = min(start + per, cursor + duration)
-            blocks.append(f"{idx}\n{fmt(start)} --> {fmt(end)}\n{' '.join(chunk)}\n")
-            idx += 1
+    for scene in ctx.storyboard["scenes"]:
+        duration = float(scene["duration_s"])
+        words = scene["narration"].split()
+        if not words:
+            cursor += duration
+            continue
+        per_word = duration / len(words)
+        chunks = [words[i : i + chunk_size] for i in range(0, len(words), chunk_size)]
+        word_pos = 0
+        for chunk in chunks:
+            start = cursor + word_pos * per_word
+            end = cursor + (word_pos + len(chunk)) * per_word
+            emph = _pick_emphasis_idx(chunk)
+            parts = []
+            for i, w in enumerate(chunk):
+                upper = w.upper()
+                if i == emph:
+                    parts.append(f"{{\\c{_CAPTION_GREEN}}}{upper}{{\\c{_CAPTION_WHITE}}}")
+                else:
+                    parts.append(upper)
+            text = " ".join(parts)
+            events.append(
+                f"Dialogue: 0,{_fmt_ass_time(start)},{_fmt_ass_time(end)},"
+                f"Default,,0,0,0,,{text}"
+            )
+            word_pos += len(chunk)
         cursor += duration
 
-    srt_path.write_text("\n".join(blocks), encoding="utf-8")
+    ass_path.write_text(header + "\n".join(events) + "\n", encoding="utf-8")
 
 
 # ---------- entry ----------
