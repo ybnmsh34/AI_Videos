@@ -298,11 +298,28 @@ def _tts_edge(text: str, voice_cfg: dict, voice_id: str, out_path: Path) -> None
     pitch = voice_cfg.get("pitch", "+0Hz")
     volume = voice_cfg.get("volume", "+0%")
 
+    # Stream so we can capture WordBoundary events (per-word timestamps)
+    # alongside the audio. Sidecar JSON is consumed by the caption renderer.
+    words_path = out_path.with_suffix(".words.json")
+
     async def _synth() -> None:
         communicate = edge_tts.Communicate(  # type: ignore
             text=text, voice=voice_id, rate=rate, pitch=pitch, volume=volume,
+            boundary="WordBoundary",
         )
-        await communicate.save(str(out_path))
+        words: list[dict] = []
+        with open(out_path, "wb") as f:
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    f.write(chunk["data"])
+                elif chunk["type"] == "WordBoundary":
+                    # offset/duration are in 100-nanosecond ticks
+                    words.append({
+                        "text": chunk["text"],
+                        "start": chunk["offset"] / 10_000_000.0,
+                        "end": (chunk["offset"] + chunk["duration"]) / 10_000_000.0,
+                    })
+        words_path.write_text(json.dumps(words), encoding="utf-8")
 
     log(f"  tts (edge-tts, {voice_id}): {text[:60]}...")
     with_retry(lambda: asyncio.run(_synth()), label="edge-tts", base_delay=3.0)
@@ -506,14 +523,38 @@ def _pick_emphasis_idx(chunk: list[str]) -> int:
     return max(candidates, key=lambda iw: (len(clean(iw[1])), iw[0]))[0]
 
 
+def _load_word_timings(narration_path: Path, text: str, duration: float) -> list[dict]:
+    """Return per-word [{text,start,end}] timings.
+    Prefers the sidecar produced by edge-tts (real word boundaries);
+    falls back to even-split when only Piper audio is available."""
+    sidecar = narration_path.with_suffix(".words.json")
+    if sidecar.exists():
+        try:
+            data = json.loads(sidecar.read_text())
+            if data:
+                return data
+        except Exception:  # noqa: BLE001
+            pass
+    words = text.split()
+    if not words:
+        return []
+    per = duration / len(words)
+    return [
+        {"text": w, "start": i * per, "end": (i + 1) * per}
+        for i, w in enumerate(words)
+    ]
+
+
 def _write_ass(ctx: "RenderContext", ass_path: Path) -> None:
-    """Hormozi-style captions: short all-caps chunks at the bottom,
-    white bold with thick black outline, one green emphasis word per chunk."""
+    """Hormozi-style karaoke captions: lower-third, all-caps, white bold with
+    a thick black outline. A short chunk of words is on screen at once; the
+    word the narrator is currently saying is bright green and ~25% larger."""
     width = ctx.width
     height = ctx.height
-    font_size = max(72, int(height * 0.058))   # ~111 at 1920px tall
-    outline = max(5, int(font_size * 0.075))    # ~8
-    margin_v = int(height * 0.14)               # sits in the lower third
+    base_size = max(72, int(height * 0.055))    # ~106 at 1920px tall
+    active_size = int(base_size * 1.28)          # the spoken word, larger
+    outline = max(5, int(base_size * 0.075))
+    margin_v = int(height * 0.14)
 
     header = (
         "[Script Info]\n"
@@ -528,7 +569,7 @@ def _write_ass(ctx: "RenderContext", ass_path: Path) -> None:
         "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
         "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
         "Alignment, MarginL, MarginR, MarginV, Encoding\n"
-        f"Style: Default,Anton,{font_size},{_CAPTION_WHITE},&H000000FF&,"
+        f"Style: Default,Anton,{base_size},{_CAPTION_WHITE},&H000000FF&,"
         f"&H00000000&,&H00000000&,1,0,0,0,100,100,0,0,1,{outline},0,2,"
         f"80,80,{margin_v},1\n"
         "\n"
@@ -537,35 +578,44 @@ def _write_ass(ctx: "RenderContext", ass_path: Path) -> None:
         "Effect, Text\n"
     )
 
-    chunk_size = 4
+    chunk_size = 3
     events: list[str] = []
     cursor = 0.0
-    for scene in ctx.storyboard["scenes"]:
+    for idx, scene in enumerate(ctx.storyboard["scenes"], 1):
         duration = float(scene["duration_s"])
-        words = scene["narration"].split()
-        if not words:
+        narration_path = ctx.work_dir / "scenes" / f"{idx:02d}_narration.mp3"
+        timings = _load_word_timings(narration_path, scene["narration"], duration)
+        if not timings:
             cursor += duration
             continue
-        per_word = duration / len(words)
-        chunks = [words[i : i + chunk_size] for i in range(0, len(words), chunk_size)]
-        word_pos = 0
-        for chunk in chunks:
-            start = cursor + word_pos * per_word
-            end = cursor + (word_pos + len(chunk)) * per_word
-            emph = _pick_emphasis_idx(chunk)
-            parts = []
-            for i, w in enumerate(chunk):
-                upper = w.upper()
-                if i == emph:
-                    parts.append(f"{{\\c{_CAPTION_GREEN}}}{upper}{{\\c{_CAPTION_WHITE}}}")
-                else:
-                    parts.append(upper)
-            text = " ".join(parts)
-            events.append(
-                f"Dialogue: 0,{_fmt_ass_time(start)},{_fmt_ass_time(end)},"
-                f"Default,,0,0,0,,{text}"
-            )
-            word_pos += len(chunk)
+
+        # Group consecutive words into fixed-size chunks (cards).
+        for c_start in range(0, len(timings), chunk_size):
+            chunk = timings[c_start : c_start + chunk_size]
+            card_end = cursor + chunk[-1]["end"]
+            # Each word "owns" the interval from its start to the next word's
+            # start (or to the card end for the last word). That way the
+            # green/large highlight advances exactly when the narrator does.
+            for i, word in enumerate(chunk):
+                slot_start = cursor + word["start"]
+                slot_end = (cursor + chunk[i + 1]["start"]) if i + 1 < len(chunk) else card_end
+                if slot_end <= slot_start:
+                    continue
+                parts = []
+                for j, w in enumerate(chunk):
+                    upper = w["text"].upper()
+                    if j == i:
+                        parts.append(
+                            f"{{\\fs{active_size}\\c{_CAPTION_GREEN}}}{upper}"
+                            f"{{\\fs{base_size}\\c{_CAPTION_WHITE}}}"
+                        )
+                    else:
+                        parts.append(upper)
+                text = " ".join(parts)
+                events.append(
+                    f"Dialogue: 0,{_fmt_ass_time(slot_start)},"
+                    f"{_fmt_ass_time(slot_end)},Default,,0,0,0,,{text}"
+                )
         cursor += duration
 
     ass_path.write_text(header + "\n".join(events) + "\n", encoding="utf-8")
