@@ -34,7 +34,6 @@ import argparse
 import asyncio
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -482,20 +481,9 @@ def compose(ctx: "RenderContext") -> Path:
     return final
 
 
-# Stopwords used to skip filler when picking the "emphasis" word in a caption chunk.
-_CAPTION_STOPWORDS = {
-    "a", "an", "the", "and", "or", "but", "if", "of", "on", "in", "to", "for",
-    "with", "at", "by", "is", "are", "was", "were", "be", "been", "being", "am",
-    "do", "does", "did", "have", "has", "had", "i", "you", "he", "she", "it",
-    "we", "they", "me", "him", "her", "us", "them", "my", "your", "his", "its",
-    "our", "their", "this", "that", "these", "those", "what", "when", "where",
-    "why", "how", "not", "no", "yes", "so", "than", "then", "as", "just", "like",
-    "up", "down", "out", "over", "into", "from", "about",
-}
-
 # ASS colour format is &HAABBGGRR&
 _CAPTION_WHITE = "&H00FFFFFF&"
-_CAPTION_GREEN = "&H0000FF00&"   # bright pure green for the emphasis word
+_CAPTION_GREEN = "&H0000FF00&"
 
 
 def _fmt_ass_time(t: float) -> str:
@@ -506,21 +494,6 @@ def _fmt_ass_time(t: float) -> str:
     if cs == 100:
         s += 1; cs = 0
     return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
-
-
-def _pick_emphasis_idx(chunk: list[str]) -> int:
-    """Choose which word in the chunk gets the green highlight.
-    Prefer the longest non-stopword; fall back to the last word."""
-    def clean(w: str) -> str:
-        return re.sub(r"[^\w]", "", w).lower()
-
-    candidates = [
-        (i, w) for i, w in enumerate(chunk)
-        if clean(w) and clean(w) not in _CAPTION_STOPWORDS
-    ]
-    if not candidates:
-        return len(chunk) - 1
-    return max(candidates, key=lambda iw: (len(clean(iw[1])), iw[0]))[0]
 
 
 def _load_word_timings(narration_path: Path, text: str, duration: float) -> list[dict]:
@@ -545,15 +518,54 @@ def _load_word_timings(narration_path: Path, text: str, duration: float) -> list
     ]
 
 
+def _chunk_words(timings: list[dict], max_words: int = 5) -> list[list[dict]]:
+    """Group consecutive words into phrase-shaped cards: up to max_words,
+    but break early at sentence/clause punctuation so phrases stay together."""
+    chunks: list[list[dict]] = []
+    cur: list[dict] = []
+    for w in timings:
+        cur.append(w)
+        last_char = w["text"][-1:] if w["text"] else ""
+        ends_phrase = last_char in ".!?;:—"
+        ends_clause = last_char == "," and len(cur) >= 3
+        if len(cur) >= max_words or ends_phrase or ends_clause:
+            chunks.append(cur)
+            cur = []
+    if cur:
+        chunks.append(cur)
+    return chunks
+
+
+def _format_card(chunk: list[dict], active_idx: int, base_size: int, active_size: int) -> str:
+    """Render a card's words with one active word styled green+larger.
+    Cards of 4+ words wrap into 2 balanced lines (joined with \\N)."""
+    parts: list[str] = []
+    for j, w in enumerate(chunk):
+        upper = w["text"].upper()
+        if j == active_idx:
+            parts.append(
+                f"{{\\fs{active_size}\\c{_CAPTION_GREEN}}}{upper}"
+                f"{{\\fs{base_size}\\c{_CAPTION_WHITE}}}"
+            )
+        else:
+            parts.append(upper)
+    if len(chunk) >= 4:
+        mid = (len(chunk) + 1) // 2
+        return " ".join(parts[:mid]) + r"\N" + " ".join(parts[mid:])
+    return " ".join(parts)
+
+
 def _write_ass(ctx: "RenderContext", ass_path: Path) -> None:
-    """Hormozi-style karaoke captions: lower-third, all-caps, white bold with
-    a thick black outline. A short chunk of words is on screen at once; the
-    word the narrator is currently saying is bright green and ~25% larger."""
+    """Karaoke captions in the Hormozi short-form style: lower-third,
+    all-caps, white bold with a thick black outline, phrase-shaped cards
+    that wrap into 2 lines when long. The word the narrator is currently
+    speaking is bright green and ~35% larger; the highlight advances at
+    each real word boundary captured from edge-tts."""
     width = ctx.width
     height = ctx.height
     base_size = max(72, int(height * 0.055))    # ~106 at 1920px tall
-    active_size = int(base_size * 1.28)          # the spoken word, larger
-    outline = max(5, int(base_size * 0.075))
+    active_size = int(base_size * 1.35)
+    outline = max(5, int(base_size * 0.08))
     margin_v = int(height * 0.14)
 
     header = (
@@ -561,7 +573,7 @@ def _write_ass(ctx: "RenderContext", ass_path: Path) -> None:
         "ScriptType: v4.00+\n"
         f"PlayResX: {width}\n"
         f"PlayResY: {height}\n"
-        "WrapStyle: 2\n"
+        "WrapStyle: 0\n"
         "ScaledBorderAndShadow: yes\n"
         "\n"
         "[V4+ Styles]\n"
@@ -571,14 +583,13 @@ def _write_ass(ctx: "RenderContext", ass_path: Path) -> None:
         "Alignment, MarginL, MarginR, MarginV, Encoding\n"
         f"Style: Default,Anton,{base_size},{_CAPTION_WHITE},&H000000FF&,"
         f"&H00000000&,&H00000000&,1,0,0,0,100,100,0,0,1,{outline},0,2,"
-        f"80,80,{margin_v},1\n"
+        f"60,60,{margin_v},1\n"
         "\n"
         "[Events]\n"
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, "
         "Effect, Text\n"
     )
 
-    chunk_size = 3
     events: list[str] = []
     cursor = 0.0
     for idx, scene in enumerate(ctx.storyboard["scenes"], 1):
@@ -589,32 +600,20 @@ def _write_ass(ctx: "RenderContext", ass_path: Path) -> None:
             cursor += duration
             continue
 
-        # Group consecutive words into fixed-size chunks (cards).
-        for c_start in range(0, len(timings), chunk_size):
-            chunk = timings[c_start : c_start + chunk_size]
+        for chunk in _chunk_words(timings, max_words=5):
             card_end = cursor + chunk[-1]["end"]
-            # Each word "owns" the interval from its start to the next word's
-            # start (or to the card end for the last word). That way the
-            # green/large highlight advances exactly when the narrator does.
+            # The active word "owns" the interval from its own start to the
+            # next word's start (or the card end for the last word), so the
+            # green highlight advances exactly with the speaker.
             for i, word in enumerate(chunk):
                 slot_start = cursor + word["start"]
                 slot_end = (cursor + chunk[i + 1]["start"]) if i + 1 < len(chunk) else card_end
                 if slot_end <= slot_start:
                     continue
-                parts = []
-                for j, w in enumerate(chunk):
-                    upper = w["text"].upper()
-                    if j == i:
-                        parts.append(
-                            f"{{\\fs{active_size}\\c{_CAPTION_GREEN}}}{upper}"
-                            f"{{\\fs{base_size}\\c{_CAPTION_WHITE}}}"
-                        )
-                    else:
-                        parts.append(upper)
-                text = " ".join(parts)
                 events.append(
                     f"Dialogue: 0,{_fmt_ass_time(slot_start)},"
-                    f"{_fmt_ass_time(slot_end)},Default,,0,0,0,,{text}"
+                    f"{_fmt_ass_time(slot_end)},Default,,0,0,0,,"
+                    f"{_format_card(chunk, i, base_size, active_size)}"
                 )
         cursor += duration
 
