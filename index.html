@@ -152,6 +152,18 @@
         <button class="type-btn active" data-type="expense">הוצאה</button>
         <button class="type-btn" data-type="income">הכנסה</button>
       </div>
+      <div class="scan-block">
+        <button type="button" class="scan-btn" id="scanBtn">
+          <span class="scan-ico">📷</span>
+          <span>מילוי אוטומטי מצילום / PDF</span>
+        </button>
+        <input type="file" id="scanFile" accept="image/*,application/pdf" capture="environment" hidden />
+        <div class="scan-progress hidden" id="scanProgress">
+          <div class="scan-bar"><div id="scanBarFill"></div></div>
+          <span id="scanLabel">מתחיל…</span>
+        </div>
+        <div class="scan-note hidden" id="scanNote"></div>
+      </div>
       <form id="txForm">
         <input type="hidden" id="txId" />
         <label class="field">
@@ -196,6 +208,9 @@
 
   <div id="toast" class="toast hidden"></div>
 
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+  <script src="ocr.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

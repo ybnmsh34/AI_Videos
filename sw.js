@@ -1,10 +1,11 @@
 /* Service Worker — מאפשר עבודה אופליין (cache-first לקבצי האפליקציה) */
-const CACHE = 'op-invoices-v1';
+const CACHE = 'op-invoices-v2';
 const ASSETS = [
   './',
   './index.html',
   './styles.css',
   './app.js',
+  './ocr.js',
   './manifest.json',
   './icons/icon-192.png',
   './icons/icon-512.png',

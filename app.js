@@ -273,6 +273,7 @@ function openModal(tx) {
   const form = $('#txForm');
   form.reset();
   populateCategorySelect();
+  resetScanUI();
 
   if (tx) {
     $('#modalTitle').textContent = 'עריכת תנועה';
@@ -299,6 +300,80 @@ function openModal(tx) {
   modal.classList.remove('hidden');
 }
 function closeModal() { $('#txModal').classList.add('hidden'); }
+
+/* ---------- סריקת חשבונית (OCR) ---------- */
+function resetScanUI() {
+  $('#scanProgress').classList.add('hidden');
+  $('#scanNote').classList.add('hidden');
+  $('#scanBtn').disabled = false;
+  document.querySelectorAll('.field.filled').forEach(f => f.classList.remove('filled'));
+}
+
+function markFilled(inputEl) {
+  const field = inputEl.closest('.field');
+  if (field) field.classList.add('filled');
+}
+
+async function runScan(file) {
+  if (!file) return;
+  if (typeof OCR === 'undefined' || !window.Tesseract) {
+    showScanNote('err', 'רכיב הקריאה לא נטען. ודא חיבור לאינטרנט בטעינה הראשונה, ונסה שוב.');
+    return;
+  }
+  const btn = $('#scanBtn');
+  btn.disabled = true;
+  const prog = $('#scanProgress');
+  const fill = $('#scanBarFill');
+  const label = $('#scanLabel');
+  $('#scanNote').classList.add('hidden');
+  prog.classList.remove('hidden');
+  fill.style.width = '0%';
+  label.textContent = 'מתחיל…';
+
+  try {
+    const text = await OCR.readFile(file, ({ pct, label: l }) => {
+      fill.style.width = (pct || 0) + '%';
+      label.textContent = l + ' ' + (pct || 0) + '%';
+    });
+    const r = OCR.parseInvoice(text);
+
+    // סריקה תמיד לצד הוצאה
+    state.modalType = 'expense';
+    applyModalType();
+
+    const found = [];
+    if (r.amount != null) { $('#txAmount').value = r.amount; markFilled($('#txAmount')); found.push('סכום'); }
+    if (r.date) { $('#txDate').value = r.date; markFilled($('#txDate')); found.push('תאריך'); }
+    if (r.invoiceNum) { $('#txInvoiceNum').value = r.invoiceNum; markFilled($('#txInvoiceNum')); found.push('מס׳ חשבונית'); }
+    if (r.supplier) { $('#txSupplier').value = r.supplier; markFilled($('#txSupplier')); found.push('ספק'); }
+    if (r.category) {
+      $('#txCategory').value = r.category;
+      $('#txRecognition').value = catPct(r.category);
+      markFilled($('#txCategory'));
+      found.push('קטגוריה');
+    }
+    updateRecognizedPreview();
+
+    prog.classList.add('hidden');
+    if (found.length) {
+      showScanNote('ok', `זוהו: ${found.join(', ')}. בדוק ותקן במידת הצורך לפני שמירה.`);
+    } else {
+      showScanNote('err', 'לא הצלחתי לחלץ נתונים מהקובץ. נסה תמונה ברורה יותר או מלא ידנית.');
+    }
+  } catch (err) {
+    prog.classList.add('hidden');
+    showScanNote('err', 'שגיאה בקריאת הקובץ. נסה שוב או מלא ידנית.');
+  } finally {
+    btn.disabled = false;
+    $('#scanFile').value = '';
+  }
+}
+
+function showScanNote(kind, msg) {
+  const n = $('#scanNote');
+  n.className = 'scan-note ' + kind;
+  n.textContent = msg;
+}
 
 function populateCategorySelect() {
   $('#txCategory').innerHTML = state.categories.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
@@ -445,6 +520,10 @@ function bindEvents() {
   });
   $('#txAmount').addEventListener('input', updateRecognizedPreview);
   $('#txRecognition').addEventListener('input', updateRecognizedPreview);
+
+  // סריקת חשבונית
+  $('#scanBtn').addEventListener('click', () => $('#scanFile').click());
+  $('#scanFile').addEventListener('change', e => { if (e.target.files[0]) runScan(e.target.files[0]); });
 
   // לחיצה על תנועה -> עריכה
   document.addEventListener('click', e => {
