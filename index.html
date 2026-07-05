@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f766e" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="מעקב חשבוניות" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="icon" type="image/png" href="icons/icon-192.png" />
+  <link rel="stylesheet" href="styles.css" />
+  <title>מעקב חשבוניות — עוסק פטור</title>
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="header-title">
+        <span class="logo-dot"></span>
+        <h1 id="viewTitle">סיכום שנתי</h1>
+      </div>
+      <select id="yearSelect" class="year-select" aria-label="בחירת שנה"></select>
+    </header>
+
+    <main id="main">
+      <!-- ===== Dashboard ===== -->
+      <section class="view" id="view-dashboard">
+        <div class="ceiling-card" id="ceilingCard">
+          <div class="ceiling-head">
+            <span>תקרת מחזור שנתית</span>
+            <span id="ceilingStatus" class="ceiling-status"></span>
+          </div>
+          <div class="ceiling-bar"><div class="ceiling-fill" id="ceilingFill"></div></div>
+          <div class="ceiling-nums">
+            <span id="ceilingUsed">₪0</span>
+            <span id="ceilingMax" class="muted">/ ₪120,000</span>
+          </div>
+        </div>
+
+        <div class="stat-grid">
+          <div class="stat-card income">
+            <div class="stat-label">הכנסות</div>
+            <div class="stat-value" id="sumIncome">₪0</div>
+          </div>
+          <div class="stat-card expense">
+            <div class="stat-label">הוצאות (סה"כ)</div>
+            <div class="stat-value" id="sumExpense">₪0</div>
+          </div>
+          <div class="stat-card recognized">
+            <div class="stat-label">הוצאות מוכרות</div>
+            <div class="stat-value" id="sumRecognized">₪0</div>
+          </div>
+          <div class="stat-card profit">
+            <div class="stat-label">רווח חייב במס (משוער)</div>
+            <div class="stat-value" id="sumProfit">₪0</div>
+          </div>
+        </div>
+
+        <div class="section-block">
+          <div class="section-title">תנועות אחרונות</div>
+          <div id="recentList" class="tx-list"></div>
+        </div>
+      </section>
+
+      <!-- ===== Transactions ===== -->
+      <section class="view hidden" id="view-transactions">
+        <div class="filter-bar">
+          <button class="chip active" data-filter="all">הכל</button>
+          <button class="chip" data-filter="income">הכנסות</button>
+          <button class="chip" data-filter="expense">הוצאות</button>
+          <input type="search" id="searchInput" placeholder="חיפוש ספק / תיאור…" />
+        </div>
+        <div id="txList" class="tx-list"></div>
+      </section>
+
+      <!-- ===== Reports ===== -->
+      <section class="view hidden" id="view-reports">
+        <div class="report-summary" id="reportSummary"></div>
+        <div class="section-block">
+          <div class="section-title">פילוח הוצאות מוכרות לפי קטגוריה</div>
+          <div id="categoryBreakdown" class="cat-breakdown"></div>
+        </div>
+        <div class="section-block">
+          <div class="section-title">סיכום חודשי</div>
+          <div id="monthlyBreakdown" class="monthly"></div>
+        </div>
+        <button class="btn-secondary full" id="exportCsvBtn">ייצוא לאקסל (CSV)</button>
+      </section>
+
+      <!-- ===== Settings ===== -->
+      <section class="view hidden" id="view-settings">
+        <div class="section-block">
+          <div class="section-title">הגדרות עסק</div>
+          <label class="field">
+            <span>תקרת מחזור שנתית (₪)</span>
+            <input type="number" id="ceilingInput" inputmode="numeric" />
+          </label>
+          <p class="hint">תקרת עוסק פטור נכון ל־2025 היא כ־₪120,000. מתעדכנת מדי שנה — ניתן לעדכן כאן.</p>
+        </div>
+
+        <div class="section-block">
+          <div class="section-title">קטגוריות הוצאה ואחוזי הכרה</div>
+          <p class="hint">אחוז ההכרה קובע כמה מההוצאה מוכרת לצורך מס הכנסה. ערכי ברירת המחדל הם הערכה נפוצה — התאם מול רואה החשבון שלך.</p>
+          <div id="catSettings" class="cat-settings"></div>
+        </div>
+
+        <div class="section-block">
+          <div class="section-title">גיבוי ונתונים</div>
+          <button class="btn-secondary full" id="backupBtn">ייצוא גיבוי (JSON)</button>
+          <button class="btn-secondary full" id="restoreBtn">ייבוא גיבוי</button>
+          <input type="file" id="restoreFile" accept="application/json" hidden />
+          <button class="btn-danger full" id="resetBtn">מחיקת כל הנתונים</button>
+        </div>
+
+        <div class="disclaimer">
+          ⚠️ האפליקציה היא כלי עזר לניהול ומעקב בלבד ואינה מהווה ייעוץ מס. אחוזי ההכרה וכללי ההוצאות המוכרות משתנים ותלויים בנסיבות. יש לאמת כל נתון מול רואה חשבון / יועץ מס מוסמך.
+        </div>
+      </section>
+    </main>
+
+    <!-- Floating add button -->
+    <button class="fab" id="fabAdd" aria-label="הוספת תנועה">+</button>
+
+    <!-- Bottom navigation -->
+    <nav class="bottom-nav">
+      <button class="nav-btn active" data-view="dashboard">
+        <span class="nav-ico">◧</span><span>ראשי</span>
+      </button>
+      <button class="nav-btn" data-view="transactions">
+        <span class="nav-ico">≣</span><span>תנועות</span>
+      </button>
+      <button class="nav-btn" data-view="reports">
+        <span class="nav-ico">▤</span><span>דוחות</span>
+      </button>
+      <button class="nav-btn" data-view="settings">
+        <span class="nav-ico">⚙</span><span>הגדרות</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- ===== Add/Edit Modal ===== -->
+  <div class="modal-overlay hidden" id="txModal">
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <div class="modal-head">
+        <h2 id="modalTitle">תנועה חדשה</h2>
+        <button class="modal-close" id="modalClose" aria-label="סגירה">✕</button>
+      </div>
+      <div class="type-toggle">
+        <button class="type-btn active" data-type="expense">הוצאה</button>
+        <button class="type-btn" data-type="income">הכנסה</button>
+      </div>
+      <div class="scan-block">
+        <button type="button" class="scan-btn" id="scanBtn">
+          <span class="scan-ico">📷</span>
+          <span>מילוי אוטומטי מצילום / PDF</span>
+        </button>
+        <input type="file" id="scanFile" accept="image/*,application/pdf" capture="environment" hidden />
+        <div class="scan-progress hidden" id="scanProgress">
+          <div class="scan-bar"><div id="scanBarFill"></div></div>
+          <span id="scanLabel">מתחיל…</span>
+        </div>
+        <div class="scan-note hidden" id="scanNote"></div>
+      </div>
+      <form id="txForm">
+        <input type="hidden" id="txId" />
+        <label class="field">
+          <span>סכום (₪, כולל מע"מ)</span>
+          <input type="number" id="txAmount" inputmode="decimal" step="0.01" required placeholder="0.00" />
+        </label>
+        <label class="field">
+          <span id="supplierLabel">שם ספק</span>
+          <input type="text" id="txSupplier" placeholder="למשל: חברת החשמל" />
+        </label>
+        <label class="field" id="categoryField">
+          <span>קטגוריה</span>
+          <select id="txCategory"></select>
+        </label>
+        <div class="field-row" id="recognitionRow">
+          <label class="field">
+            <span>אחוז הכרה</span>
+            <input type="number" id="txRecognition" inputmode="numeric" min="0" max="100" />
+          </label>
+          <div class="recognized-preview">
+            <span>מוכר למס</span>
+            <strong id="recognizedPreview">₪0</strong>
+          </div>
+        </div>
+        <label class="field">
+          <span>תאריך</span>
+          <input type="date" id="txDate" required />
+        </label>
+        <label class="field">
+          <span>מספר חשבונית / אסמכתא</span>
+          <input type="text" id="txInvoiceNum" placeholder="לא חובה" />
+        </label>
+        <label class="field">
+          <span>הערות</span>
+          <textarea id="txNotes" rows="2" placeholder="לא חובה"></textarea>
+        </label>
+        <button type="submit" class="btn-primary full">שמירה</button>
+        <button type="button" class="btn-danger full hidden" id="deleteTxBtn">מחיקת תנועה</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+  <script src="ocr.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
